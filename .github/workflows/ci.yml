@@ -28,7 +28,7 @@ jobs:
       - name: Install git (arch container)
         if: matrix.image == 'archlinux:base'
         run: |
-          pacman -Syu --noconfirm git
+          pacman -Syu --noconfirm git patch
           pacman -S --noconfirm --needed gcc make cmake
 
       - uses: actions/checkout@v4
