@@ -48,6 +48,7 @@ jobs:
 
       - name: Apply libssh async-write patch
         run: |
+          git -C libssh fetch --all --tags --prune
           desc=$(git -C libssh describe --tags)
           echo "Applying patch/${desc}.patch"
           test -f "patch/${desc}.patch"
