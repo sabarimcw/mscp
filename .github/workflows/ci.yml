@@ -70,8 +70,12 @@ jobs:
       - name: Smoke test (ssh_config default)
         shell: bash
         run: |
-          mkdir -p ~/.ssh
-          cat > ~/.ssh/config <<'EOF'
+          # libssh resolves the home directory via getpwuid, which in
+          # GitHub container jobs (/root) differs from $HOME
+          # (/github/home). Write the config to the passwd home.
+          home=$(getent passwd "$(id -u)" | cut -d: -f6)
+          mkdir -p "$home/.ssh"
+          cat > "$home/.ssh/config" <<'EOF'
           Host mscpci-alias
             Hostname 127.0.0.1
             Port 2222

@@ -16,12 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         index: # see DIST_IDS and DIST_VERS lists in CMakeLists.txt
-        # this fork targets Ubuntu and Arch Linux only; rocky/almalinux
-        # containers fail on GitHub runners due to ip6-localhost issues
-        - ubuntu-20.04
+        # this fork targets Ubuntu 22.04/24.04 and Arch Linux only
         - ubuntu-22.04
         - ubuntu-24.04
-        - alpine-3.22
         - arch-base
     steps:
     - uses: actions/checkout@v4
