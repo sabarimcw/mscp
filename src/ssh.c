@@ -83,8 +83,13 @@ static int ssh_set_opts(ssh_session ssh, struct mscp_ssh_opts *opts)
 		}
 	}
 
-	if (opts->config && ssh_options_parse_config(ssh, opts->config) < 0) {
-		priv_set_errv("failed to parse ssh_config: %s", opts->config);
+	/* parse ssh_config: opts->config (-F) if given, otherwise
+	 * libssh defaults to ~/.ssh/config and /etc/ssh/ssh_config.
+	 * This must be called after SSH_OPTIONS_HOST is set so that
+	 * Host/Match blocks can match the destination host. */
+	if (ssh_options_parse_config(ssh, opts->config) < 0) {
+		priv_set_errv("failed to parse ssh_config: %s",
+			      opts->config ? opts->config : "~/.ssh/config");
 		return -1;
 	}
 
