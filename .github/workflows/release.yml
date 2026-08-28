@@ -1,40 +1,113 @@
-name: release
+name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
-  workflow_dispatch:
+    tags: ["v*"]
 
-env:
-    BUILD_TYPE: Release
+permissions:
+  contents: write
 
 jobs:
-  source-release:
+  build:
+    name: build (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Build on the oldest ubuntu runner for wide glibc compatibility
+          - name: ubuntu-22.04
+            image: ""
+          - name: ubuntu-24.04
+            image: ""
+          - name: archlinux
+            image: archlinux:base
+    container: ${{ matrix.image && matrix.image || null }}
+
     steps:
+      - name: Install git (arch container)
+        if: matrix.image == 'archlinux:base'
+        run: |
+          pacman -Syu --noconfirm git
+          pacman -S --noconfirm --needed gcc make cmake
+
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
-      - name: apply the patch to libssh
+      - name: Install build dependencies (ubuntu)
+        if: runner.os == 'Linux' && matrix.image == ''
         run: |
-          git -C libssh fetch --all --tags --prune
-          patch -d libssh -p1 < patch/$(git -C libssh describe).patch
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            gcc make cmake zlib1g-dev libssl-dev libkrb5-dev patch
 
-      - name: Set variables
+      - name: Install build dependencies (arch)
+        if: matrix.image == 'archlinux:base'
+        run: pacman -S --noconfirm --needed zlib openssl
+
+      - name: Apply libssh async-write patch
         run: |
-          VER=$(cat VERSION)
-          echo "VERSION=$VER" >> $GITHUB_ENV
+          desc=$(git -C libssh describe --tags)
+          test -f "patch/${desc}.patch"
+          patch -d libssh -p1 < "patch/${desc}.patch"
 
-      - name: archive
+      - name: Build
         run: |
-          cd ..
-          cp -r mscp mscp-${{env.VERSION}}
-          tar zcvf mscp-${{env.VERSION}}.tar.gz --exclude-vcs mscp-${{env.VERSION}}
+          mkdir -p build && cd build
+          cmake ..
+          make -j"$(nproc)"
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Package
+        id: pkg
+        env:
+          MSCP_VERSION: ${{ github.ref_name }}
+        run: |
+          tag="${MSCP_VERSION#v}"
+          case "${{ matrix.name }}" in
+            archlinux) platform="arch" ;;
+            *)         platform="${{ matrix.name }}" ;;
+          esac
+          dir="mscp-${tag}-${platform}-x86_64"
+          mkdir -p "$dir"
+          install -m 0755 build/mscp "$dir/mscp"
+          test -f build/mscp.1 && install -m 0644 build/mscp.1 "$dir/mscp.1"
+          {
+            echo "mscp ${MSCP_VERSION} (${platform}, x86_64)"
+            echo "Install: sudo install -m755 mscp /usr/local/bin/"
+            echo "         sudo install -m644 mscp.1 /usr/local/share/man/man1/"
+          } > "$dir/README.txt"
+          tar czf "$dir.tar.gz" "$dir"
+          sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
+          echo "asset=$dir.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ${{github.workspace}}/../mscp-${{env.VERSION}}.tar.gz
+          name: release-${{ matrix.name }}-x86_64
+          path: |
+            ${{ steps.pkg.outputs.asset }}
+            ${{ steps.pkg.outputs.asset }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "mscp ${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*
